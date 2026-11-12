@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}核对报告 · 馆藏成套器物核对工具{% endblock %}
+
+{% macro badge(status) %}
+{% set cls = {"一致": "b-ok", "缺记录": "b-bad", "归属不符": "b-bad", "编号不符": "b-bad",
+              "无法确认": "b-warn", "未被套件列入": "b-warn"} %}
+<span class="badge {{ cls.get(status, 'b-info') }}">{{ status }}</span>
+{% endmacro %}
+
+{% block content %}
+<h1>核对报告</h1>
+<p><a href="/">← 返回重新核对</a></p>
+
+{% if r.incomplete %}
+<div class="banner warn">⚠ 核对不完整：部分页面抓取失败或抓取被截断。未抓到的器件未被直接判为缺记录，请重点查看「抓取失败」与「无法确认」两节，修复后重新核对。</div>
+{% else %}
+<div class="banner ok">✔ 核对完整：本次抓取未出现失败，下列结论可信。</div>
+{% endif %}
+
+<div class="card">
+<table>
+  <tr><th style="width:120px">起始地址</th><td><a href="{{ r.start_url }}" target="_blank">{{ r.start_url }}</a></td></tr>
+  <tr><th>抓取规模</th><td>列表页 {{ r.stats.list_pages }} 个 · 套件 {{ r.stats.suites }} 件 · 器件详情 {{ r.stats['items'] }} 件</td></tr>
+  <tr><th>双向核对</th><td>套件共列出 {{ r.stats.declared }} 个器件编号，其中 {{ r.stats.consistent }} 项双向一致</td></tr>
+  <tr><th>报告时间</th><td>{{ r.generated_at }}（耗时 {{ "%.1f" | format(r.elapsed) }} 秒）</td></tr>
+</table>
+</div>
+
+<h2>一、缺记录（套件列出但目录中无此器件）<span class="badge b-bad">{{ r.missing | length }}</span></h2>
+{% if r.missing %}
+<table>
+  <tr><th>器件编号</th><th>列出它的套件</th><th>来源链接</th></tr>
+  {% for m in r.missing %}
+  <tr>
+    <td><code>{{ m.accession }}</code></td>
+    <td>{{ m.suite.number }} {{ m.suite.name }}</td>
+    <td><a href="{{ m.suite.url }}" target="_blank">套件页</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="empty">无</p>{% endif %}
+
+<h2>二、归属不符（器件与套件互指不一致）<span class="badge b-bad">{{ r.mismatches | length }}</span></h2>
+{% if r.mismatches %}
+<table>
+  <tr><th>器件</th><th>器件标注所属</th><th>涉及套件</th><th>问题说明</th><th>来源链接</th></tr>
+  {% for m in r.mismatches %}
+  <tr>
+    <td>{% if m.item %}<code>{{ m.item.number }}</code> {{ m.item.name }}{% else %}—{% endif %}</td>
+    <td>{% if m.item and m.item.suite_no %}{{ m.item.suite_no }}{% else %}（未注明）{% endif %}</td>
+    <td>{% if m.suite %}{{ m.suite.number }} {{ m.suite.name }}{% else %}—{% endif %}</td>
+    <td>{{ m.problem }}{% if m.caveat %}<br><span class="muted">（存在抓取失败，此结论待修复后复核）</span>{% endif %}</td>
+    <td>
+      {% if m.item %}<a href="{{ m.item.url }}" target="_blank">器件页</a>{% endif %}
+      {% if m.suite %}<a href="{{ m.suite.url }}" target="_blank">套件页</a>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="empty">无</p>{% endif %}
+
+<h2>三、未被套件列入的器件<span class="badge b-warn">{{ r.orphans | length }}</span></h2>
+{% if r.orphans %}
+<table>
+  <tr><th>器件编号</th><th>名称</th><th>来源链接</th></tr>
+  {% for it in r.orphans %}
+  <tr>
+    <td><code>{{ it.number }}</code></td>
+    <td>{{ it.name }}</td>
+    <td><a href="{{ it.url }}" target="_blank">器件页</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="empty">无</p>{% endif %}
+
+{% if r.unverifiable %}
+<h2>四、无法确认（存在抓取失败，未直接判为缺记录）<span class="badge b-warn">{{ r.unverifiable | length }}</span></h2>
+<table>
+  <tr><th>器件编号</th><th>列出它的套件</th><th>原因</th><th>相关链接</th></tr>
+  {% for u in r.unverifiable %}
+  <tr>
+    <td><code>{{ u.accession }}</code></td>
+    <td>{{ u.suite.number }} {{ u.suite.name }}</td>
+    <td>{{ u.reason }}</td>
+    <td>
+      <a href="{{ u.suite.url }}" target="_blank">套件页</a>
+      {% if u.link %}<a href="{{ u.link }}" target="_blank">器件详情地址</a>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if r.failures or r.notes %}
+<h2>五、抓取失败与异常<span class="badge b-warn">{{ r.failures | length }}</span></h2>
+{% for n in r.notes %}<p class="muted">⚠ {{ n }}</p>{% endfor %}
+{% if r.failures %}
+<table>
+  <tr><th>失败地址</th><th>引用它的页面</th><th>原因</th></tr>
+  {% for f in r.failures %}
+  <tr>
+    <td><a href="{{ f.url }}" target="_blank">{{ f.url }}</a></td>
+    <td>{% if f.referrer %}<a href="{{ f.referrer }}" target="_blank">{{ f.referrer }}</a>{% else %}（起始地址）{% endif %}</td>
+    <td>{{ f.reason }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endif %}
+
+{% if r.duplicates %}
+<h2>六、跨页重复引用（已去重，仅统计一次）<span class="badge b-info">{{ r.duplicates | length }}</span></h2>
+<table>
+  <tr><th>详情地址</th><th>被引用次数</th><th>引用它的页面</th></tr>
+  {% for d in r.duplicates %}
+  <tr>
+    <td><a href="{{ d.url }}" target="_blank">{{ d.url }}</a></td>
+    <td>{{ d.referrers | length }}</td>
+    <td>{% for ref in d.referrers %}<a href="{{ ref }}" target="_blank">{{ ref }}</a>{% if not loop.last %}、{% endif %}{% endfor %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+{% if r.number_conflicts %}
+<h2>七、编号冲突（同一编号出现在不同页面）<span class="badge b-bad">{{ r.number_conflicts | length }}</span></h2>
+<table>
+  <tr><th>编号</th><th>类型</th><th>首次记录</th><th>冲突记录</th></tr>
+  {% for c in r.number_conflicts %}
+  <tr>
+    <td><code>{{ c.number }}</code></td>
+    <td>{{ c.kind }}</td>
+    <td><a href="{{ c.first.url }}" target="_blank">{{ c.first.url }}</a></td>
+    <td><a href="{{ c.second.url }}" target="_blank">{{ c.second.url }}</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>八、双向对照明细</h2>
+<details open>
+<summary><b>套件 → 器件</b>（套件页列出的器件编号及核对状态）</summary>
+{% for row in r.suite_rows %}
+<h3>{{ row.suite.number }} {{ row.suite.name }}
+    <a href="{{ row.suite.url }}" target="_blank" class="muted">来源</a></h3>
+<table>
+  <tr><th>器件编号</th><th>核对状态</th><th>对应器件详情</th></tr>
+  {% for m in row.members %}
+  <tr>
+    <td><code>{{ m.acc }}</code></td>
+    <td>{{ badge(m.status) }}</td>
+    <td>
+      {% if m.item %}<a href="{{ m.item.url }}" target="_blank">{{ m.item.name }}</a>
+      {% elif m.link %}<a href="{{ m.link }}" target="_blank">详情地址</a>
+      {% else %}（套件页未给出链接）{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endfor %}
+</details>
+
+<details open>
+<summary><b>器件 → 套件</b>（器件页标注的所属套件及核对状态）</summary>
+<table>
+  <tr><th>器件编号</th><th>名称</th><th>器件标注所属</th><th>列入它的套件</th><th>核对状态</th></tr>
+  {% for row in r.item_rows %}
+  <tr>
+    <td><a href="{{ row.item.url }}" target="_blank"><code>{{ row.item.number }}</code></a></td>
+    <td>{{ row.item.name }}</td>
+    <td>{% if row.item.suite_no %}{{ row.item.suite_no }}{% else %}（未注明）{% endif %}</td>
+    <td>
+      {% if row.listed_by %}
+        {% for s in row.listed_by %}<a href="{{ s.url }}" target="_blank">{{ s.number }}</a>{% if not loop.last %}、{% endif %}{% endfor %}
+      {% else %}（无）{% endif %}
+    </td>
+    <td>{{ badge(row.status) }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</details>
+
+<details>
+<summary class="muted">本次抓取的列表页（{{ r.list_pages | length }} 个）</summary>
+<ul>{% for p in r.list_pages %}<li><a href="{{ p }}" target="_blank">{{ p }}</a></li>{% endfor %}</ul>
+</details>
+
+{% endblock %}

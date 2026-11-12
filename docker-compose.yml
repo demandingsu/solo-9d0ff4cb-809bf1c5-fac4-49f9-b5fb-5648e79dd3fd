@@ -1,0 +1,21 @@
+# 馆藏成套器物核对工具 + 本地样本目录站
+# 用法：docker compose up --build
+#   核对工具  http://localhost:8000
+#   样本目录站 http://localhost:8001 （正常目录入口）；/broken-1.html 为故障演示入口
+services:
+  app:
+    build: ./app
+    ports:
+      - "8000:8000"
+    environment:
+      # 用户在浏览器里看到的是 localhost:8001；容器内抓取时改写到样本站服务名。
+      # 报告中的来源链接仍使用原始地址，保证浏览器离线可打开。
+      URL_FETCH_REWRITE: "localhost:8001->sample-site:80;127.0.0.1:8001->sample-site:80"
+      SAMPLE_ENTRY: "http://localhost:8001/"
+    depends_on:
+      - sample-site
+
+  sample-site:
+    build: ./sample-site
+    ports:
+      - "8001:80"

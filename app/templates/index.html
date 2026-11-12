@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>馆藏成套器物核对工具</h1>
+<p class="muted">
+输入藏品列表页地址，工具将沿同站分页抓取套件与器件详情，
+双向核对「套件列出的器件」与「器件标注的所属套件」是否一致，并列出缺记录、归属不符与未被套件列入的器件。
+</p>
+<form class="check" method="get" action="/check">
+  <input type="text" name="url" value="{{ sample_entry }}" placeholder="http://localhost:8001/" required>
+  <button type="submit">开始核对</button>
+</form>
+
+{% if sample_entry %}
+<div class="card">
+  <h3>本地样本目录站（可离线试用）</h3>
+  <ul>
+    <li><a href="/check?url={{ sample_entry | urlencode }}">核对正常目录</a>
+        <span class="muted">{{ sample_entry }} —— 演示缺记录、归属不符、未列入器件与跨页重复去重</span></li>
+    <li><a href="/check?url={{ sample_broken | urlencode }}">核对残缺目录</a>
+        <span class="muted">{{ sample_broken }} —— 演示详情抓取失败时的「核对不完整」处理</span></li>
+  </ul>
+  <p class="muted">样本站本身也可在浏览器直接打开对照：<a href="{{ sample_entry }}" target="_blank">{{ sample_entry }}</a></p>
+</div>
+{% endif %}
+
+<h2>核对规则</h2>
+<ol>
+  <li><b>缺记录</b>：套件列出了某器件编号，但完整抓取后目录中不存在该编号的器件详情。</li>
+  <li><b>归属不符</b>：器件标注的所属套件与「列入它的套件」对不上（含所属套件未收录、套件未列入该器件、器件未注明所属套件等）。</li>
+  <li><b>未被套件列入</b>：器件既未注明所属套件，也没有任何套件将其列入。</li>
+  <li><b>无法确认</b>：存在抓取失败时不把未抓到的器件直接判为缺记录，单独列出并标记核对不完整。</li>
+  <li>同一详情页被多个分页重复链接时，只抓取一次、只统计一次。</li>
+</ol>
+
+<h2>页面识别约定</h2>
+<ul class="muted">
+  <li>页面类型：<code>&lt;meta name="page-kind" content="list|suite|item"&gt;</code></li>
+  <li>分页：列表页中的 <code>&lt;a rel="next"&gt;</code>；仅跟随同站链接</li>
+  <li>详情链接：路径含 <code>/suite/</code> 或 <code>/item/</code> 的同站链接</li>
+  <li>套件页：编号 <code>.suite-no</code>；器件列表 <code>ul.members li</code> 中的 <code>.acc-no</code>（可带详情链接）</li>
+  <li>器件页：编号 <code>.acc-no</code>；所属套件 <code>.field-suite</code> 内的 <code>.suite-no</code></li>
+</ul>
+{% endblock %}

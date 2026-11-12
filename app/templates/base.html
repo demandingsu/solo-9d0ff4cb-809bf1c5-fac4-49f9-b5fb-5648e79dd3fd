@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}馆藏成套器物核对工具{% endblock %}</title>
+<style>
+:root { --ok:#1a7f37; --bad:#cf222e; --warn:#9a6700; --info:#57606a; --line:#d0d7de; }
+* { box-sizing: border-box; }
+body { font-family: "PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+       margin: 0; color: #1f2328; background: #f6f8fa; }
+main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 22px; }
+h2 { font-size: 18px; margin-top: 36px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+h2 .badge { vertical-align: middle; margin-left: 6px; }
+table { border-collapse: collapse; width: 100%; background: #fff; margin: 12px 0; }
+th, td { border: 1px solid var(--line); padding: 6px 10px; font-size: 14px; text-align: left; vertical-align: top; }
+th { background: #f0f3f6; }
+a { color: #0969da; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; color: #fff; white-space: nowrap; }
+.b-ok { background: var(--ok); } .b-bad { background: var(--bad); }
+.b-warn { background: var(--warn); } .b-info { background: var(--info); }
+.banner { padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-weight: 600; }
+.banner.ok { background: #dafbe1; color: var(--ok); }
+.banner.warn { background: #fff8c5; color: #7d4e00; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px; margin: 12px 0; }
+.muted { color: var(--info); font-size: 13px; }
+form.check { display: flex; gap: 8px; margin: 16px 0; }
+input[type=text] { flex: 1; padding: 8px 10px; font-size: 14px; border: 1px solid var(--line); border-radius: 6px; }
+button { padding: 8px 18px; font-size: 14px; border: none; border-radius: 6px; background: #1f6feb; color: #fff; cursor: pointer; }
+.empty { color: var(--ok); }
+code { background: #eff1f3; padding: 1px 5px; border-radius: 4px; }
+details { margin: 8px 0; }
+</style>
+</head>
+<body>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
