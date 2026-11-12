@@ -11,23 +11,51 @@
 <h1>核对报告</h1>
 <p><a href="/">← 返回重新核对</a></p>
 
+{% if r.unstable %}
+<div class="banner warn">⚠ 本轮无法确认：采集后复读发现 {{ r.recheck | length }} 个页面在抓取过程中发生变化或复读失败，目录可能在核对途中被更新，本轮数据或混有两个版本。确定的缺记录、归属不符、未被套件列入及一致数量已从略，请查看「采集后复读核对」中的问题地址，待目录稳定后重新核对。</div>
+{% endif %}
 {% if r.incomplete %}
 <div class="banner warn">⚠ 核对不完整：部分页面抓取失败或抓取被截断。未抓到的器件未被直接判为缺记录，请重点查看「抓取失败」与「无法确认」两节，修复后重新核对。</div>
-{% else %}
-<div class="banner ok">✔ 核对完整：本次抓取未出现失败，下列结论可信。</div>
+{% endif %}
+{% if not r.unstable and not r.incomplete %}
+<div class="banner ok">✔ 核对完整：本次抓取未出现失败，采集后复读 {{ r.rechecked }} 页均未变化，下列结论可信。</div>
 {% endif %}
 
 <div class="card">
 <table>
   <tr><th style="width:120px">起始地址</th><td><a href="{{ r.start_url }}" target="_blank">{{ r.start_url }}</a></td></tr>
   <tr><th>抓取规模</th><td>列表页 {{ r.stats.list_pages }} 个 · 套件 {{ r.stats.suites }} 件 · 器件详情 {{ r.stats['items'] }} 件</td></tr>
-  <tr><th>双向核对</th><td>套件共列出 {{ r.stats.declared }} 个器件编号，其中 {{ r.stats.consistent }} 项双向一致</td></tr>
+  <tr><th>采集后复读</th><td>复读 {{ r.rechecked }} 页 ·
+    {% if r.unstable %}<span class="badge b-warn">{{ r.recheck | length }} 页有变化或复读失败</span>
+    {% else %}<span class="badge b-ok">内容一致</span>{% endif %}</td></tr>
+  <tr><th>双向核对</th><td>
+    {% if r.unstable %}本轮无法确认，一致数量从略
+    {% else %}套件共列出 {{ r.stats.declared }} 个器件编号，其中 {{ r.stats.consistent }} 项双向一致{% endif %}</td></tr>
   <tr><th>报告时间</th><td>{{ r.generated_at }}（耗时 {{ "%.1f" | format(r.elapsed) }} 秒）</td></tr>
 </table>
 </div>
 
-<h2>一、缺记录（套件列出但目录中无此器件）<span class="badge b-bad">{{ r.missing | length }}</span></h2>
-{% if r.missing %}
+<h2>一、采集后复读核对{% if r.recheck %}<span class="badge b-warn">{{ r.recheck | length }}</span>{% endif %}</h2>
+{% if r.recheck %}
+<p class="muted">以下页面在首轮抓取后、复读时内容发生变化或读取失败，本轮结论标记为「无法确认」：</p>
+<table>
+  <tr><th>问题地址</th><th>引用它的页面</th><th>问题</th></tr>
+  {% for p in r.recheck %}
+  <tr>
+    <td><a href="{{ p.url }}" target="_blank">{{ p.url }}</a></td>
+    <td>{% if p.referrer %}<a href="{{ p.referrer }}" target="_blank">{{ p.referrer }}</a>{% else %}（起始地址）{% endif %}</td>
+    <td>{{ p.reason }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="empty">复读 {{ r.rechecked }} 页，分页、详情链接、馆藏编号与所属关系均未变化。</p>
+{% endif %}
+
+<h2>二、缺记录（套件列出但目录中无此器件）{% if not r.unstable %}<span class="badge b-bad">{{ r.missing | length }}</span>{% endif %}</h2>
+{% if r.unstable %}
+<p class="muted">本轮无法确认，缺记录结论已从略。</p>
+{% elif r.missing %}
 <table>
   <tr><th>器件编号</th><th>列出它的套件</th><th>来源链接</th></tr>
   {% for m in r.missing %}
@@ -40,8 +68,10 @@
 </table>
 {% else %}<p class="empty">无</p>{% endif %}
 
-<h2>二、归属不符（器件与套件互指不一致）<span class="badge b-bad">{{ r.mismatches | length }}</span></h2>
-{% if r.mismatches %}
+<h2>三、归属不符（器件与套件互指不一致）{% if not r.unstable %}<span class="badge b-bad">{{ r.mismatches | length }}</span>{% endif %}</h2>
+{% if r.unstable %}
+<p class="muted">本轮无法确认，归属不符结论已从略。</p>
+{% elif r.mismatches %}
 <table>
   <tr><th>器件</th><th>器件标注所属</th><th>涉及套件</th><th>问题说明</th><th>来源链接</th></tr>
   {% for m in r.mismatches %}
@@ -59,8 +89,10 @@
 </table>
 {% else %}<p class="empty">无</p>{% endif %}
 
-<h2>三、未被套件列入的器件<span class="badge b-warn">{{ r.orphans | length }}</span></h2>
-{% if r.orphans %}
+<h2>四、未被套件列入的器件{% if not r.unstable %}<span class="badge b-warn">{{ r.orphans | length }}</span>{% endif %}</h2>
+{% if r.unstable %}
+<p class="muted">本轮无法确认，未被套件列入结论已从略。</p>
+{% elif r.orphans %}
 <table>
   <tr><th>器件编号</th><th>名称</th><th>来源链接</th></tr>
   {% for it in r.orphans %}
@@ -74,7 +106,7 @@
 {% else %}<p class="empty">无</p>{% endif %}
 
 {% if r.unverifiable %}
-<h2>四、无法确认（存在抓取失败，未直接判为缺记录）<span class="badge b-warn">{{ r.unverifiable | length }}</span></h2>
+<h2>五、无法确认（存在抓取失败，未直接判为缺记录）<span class="badge b-warn">{{ r.unverifiable | length }}</span></h2>
 <table>
   <tr><th>器件编号</th><th>列出它的套件</th><th>原因</th><th>相关链接</th></tr>
   {% for u in r.unverifiable %}
@@ -92,7 +124,7 @@
 {% endif %}
 
 {% if r.failures or r.notes %}
-<h2>五、抓取失败与异常<span class="badge b-warn">{{ r.failures | length }}</span></h2>
+<h2>六、抓取失败与异常<span class="badge b-warn">{{ r.failures | length }}</span></h2>
 {% for n in r.notes %}<p class="muted">⚠ {{ n }}</p>{% endfor %}
 {% if r.failures %}
 <table>
@@ -109,7 +141,7 @@
 {% endif %}
 
 {% if r.duplicates %}
-<h2>六、跨页重复引用（已去重，仅统计一次）<span class="badge b-info">{{ r.duplicates | length }}</span></h2>
+<h2>七、跨页重复引用（已去重，仅统计一次）<span class="badge b-info">{{ r.duplicates | length }}</span></h2>
 <table>
   <tr><th>详情地址</th><th>被引用次数</th><th>引用它的页面</th></tr>
   {% for d in r.duplicates %}
@@ -123,7 +155,7 @@
 {% endif %}
 
 {% if r.number_conflicts %}
-<h2>七、编号冲突（同一编号出现在不同页面）<span class="badge b-bad">{{ r.number_conflicts | length }}</span></h2>
+<h2>八、编号冲突（同一编号出现在不同页面）<span class="badge b-bad">{{ r.number_conflicts | length }}</span></h2>
 <table>
   <tr><th>编号</th><th>类型</th><th>首次记录</th><th>冲突记录</th></tr>
   {% for c in r.number_conflicts %}
@@ -137,7 +169,10 @@
 </table>
 {% endif %}
 
-<h2>八、双向对照明细</h2>
+<h2>九、双向对照明细</h2>
+{% if r.unstable %}
+<p class="muted">本轮无法确认，核对状态列已从略；下表仅为本次抓取到的原始对照数据，可能混有两个版本，请勿直接作为结论。</p>
+{% endif %}
 <details open>
 <summary><b>套件 → 器件</b>（套件页列出的器件编号及核对状态）</summary>
 {% for row in r.suite_rows %}
@@ -148,7 +183,7 @@
   {% for m in row.members %}
   <tr>
     <td><code>{{ m.acc }}</code></td>
-    <td>{{ badge(m.status) }}</td>
+    <td>{% if r.unstable %}<span class="muted">—</span>{% else %}{{ badge(m.status) }}{% endif %}</td>
     <td>
       {% if m.item %}<a href="{{ m.item.url }}" target="_blank">{{ m.item.name }}</a>
       {% elif m.link %}<a href="{{ m.link }}" target="_blank">详情地址</a>
@@ -174,7 +209,7 @@
         {% for s in row.listed_by %}<a href="{{ s.url }}" target="_blank">{{ s.number }}</a>{% if not loop.last %}、{% endif %}{% endfor %}
       {% else %}（无）{% endif %}
     </td>
-    <td>{{ badge(row.status) }}</td>
+    <td>{% if r.unstable %}<span class="muted">—</span>{% else %}{{ badge(row.status) }}{% endif %}</td>
   </tr>
   {% endfor %}
 </table>

@@ -5,7 +5,9 @@
 - 归属不符：器件标注的所属套件与“列入它的套件”对不上（含所属套件未收录、
   套件未列入该器件、器件未注明所属套件、编号与详情页不符等）。
 - 未被套件列入：器件既未注明所属套件，也没有任何套件将其列入。
-- 无法确认：存在抓取失败 / 抓取截断时，未找到的器件编号不直接判为缺记录。
+- 无法确认（抓取失败）：存在抓取失败 / 抓取截断时，未找到的器件编号不直接判为缺记录。
+- 无法确认（目录更新）：采集后复读发现页面变化或复读失败时，本轮可能混有两个
+  版本的目录，标记为无法确认，不展示确定的缺记录、归属不符、未被套件列入及一致数量。
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ def cross_check(result: CrawlResult) -> dict:
     suites: list[SuiteRecord] = result.suites
     items: list[ItemRecord] = result.items
     incomplete = bool(result.failures) or bool(result.notes)
+    unstable = bool(result.recheck)  # 采集途中目录发生变化或复读失败
     failed_urls = {f.url for f in result.failures}
 
     items_by_no: dict[str, ItemRecord] = {}
@@ -147,6 +150,9 @@ def cross_check(result: CrawlResult) -> dict:
         "elapsed": result.elapsed,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "incomplete": incomplete,
+        "unstable": unstable,
+        "recheck": result.recheck,
+        "rechecked": result.rechecked,
         "notes": result.notes,
         "failures": result.failures,
         "missing": missing,

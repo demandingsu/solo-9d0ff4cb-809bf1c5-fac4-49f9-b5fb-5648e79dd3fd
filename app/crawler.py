@@ -1,4 +1,4 @@
-"""沿同站分页抓取套件 / 器件详情页。
+"""沿同站分页抓取套件 / 器件详情页，并在采集后复读核对。
 
 页面识别约定（样本站与真实目录站均按此解析）：
 - 页面类型：<meta name="page-kind" content="list|suite|item">
@@ -8,6 +8,12 @@
   每 <li> 的 <span class="acc-no"> 为器件馆藏编号，<a> 为可选详情链接
 - 器件页：编号 <span class="acc-no">，所属套件 <p class="field-suite"> 内的
   <span class="suite-no">（无此标记视为未注明所属套件）
+
+采集后复读：首轮抓取结束后，重新读取本轮所有成功抓取的页面（列表页、
+套件及器件详情），对照分页链接、详情链接、馆藏编号与所属关系。若复读
+失败或内容发生变化（目录在抓取途中被更新，本轮数据可能混有两个版本），
+把问题地址记入 CrawlResult.recheck，由核对层将本轮标记为「无法确认」；
+全部一致时核对结论沿用首轮结果。
 """
 from __future__ import annotations
 
@@ -18,9 +24,18 @@ from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 import requests
 from bs4 import BeautifulSoup
 
-from models import CrawlResult, DeclaredItem, FetchFailure, ItemRecord, SuiteRecord
+from models import (
+    CrawlResult,
+    DeclaredItem,
+    FetchFailure,
+    ItemRecord,
+    RecheckIssue,
+    SuiteRecord,
+)
 
 USER_AGENT = "catalog-checker/1.0 (offline museum audit)"
+
+KIND_LABELS = {"list": "列表页", "suite": "套件页", "item": "器件页"}
 
 
 class CrawlError(Exception):
@@ -132,6 +147,28 @@ def parse_item(url: str, soup: BeautifulSoup) -> ItemRecord | None:
     return ItemRecord(number=number, name=name, url=url, suite_no=suite_no)
 
 
+def describe_change(old: tuple, new: tuple) -> str:
+    """说明同一页面两次读取快照的差异（快照结构见 Crawler._snapshot）。"""
+    if old[0] != new[0]:
+        return "页面类型由「{}」变为「{}」".format(
+            KIND_LABELS.get(old[0], old[0]), KIND_LABELS.get(new[0], new[0])
+        )
+    kind = old[0]
+    parts: list[str] = []
+    if old[1] != new[1]:
+        if kind == "suite":
+            parts.append("套件编号或器件清单发生变化")
+        elif kind == "item":
+            parts.append("器件编号或所属套件标注发生变化")
+        else:
+            parts.append("页面解析结果发生变化")
+    if old[2] != new[2]:
+        parts.append("分页链接发生变化")
+    if old[3] != new[3]:
+        parts.append("详情链接发生变化")
+    return "；".join(parts) or "页面内容发生变化"
+
+
 class Crawler:
     def __init__(
         self,
@@ -159,6 +196,53 @@ class Crawler:
             resp.encoding = resp.apparent_encoding or "utf-8"
         return resp.text
 
+    def _parse_page(self, url: str, html: str):
+        """解析一页，返回 (页面类型, 解析记录, 分页链接, 详情链接, 解析错误)。
+
+        解析记录为 SuiteRecord / ItemRecord / None；列表页与解析失败的页面为 None。
+        """
+        soup = BeautifulSoup(html, "html.parser")
+        kind = page_kind(soup)
+        if kind not in ("suite", "item"):
+            kind = "list"
+        next_links: list[str] = []
+        if kind == "list":
+            for a in soup.select('a[rel="next"][href]'):
+                u = normalize_url(urljoin(url, a["href"]))
+                if same_site(self.start_url, u):
+                    next_links.append(u)
+        detail_links: list[str] = []
+        for a in soup.find_all("a", href=True):
+            u = normalize_url(urljoin(url, a["href"]))
+            if (
+                u.startswith(("http://", "https://"))
+                and same_site(self.start_url, u)
+                and looks_like_detail(u)
+            ):
+                detail_links.append(u)
+        record: SuiteRecord | ItemRecord | None = None
+        parse_error = None
+        if kind == "suite":
+            record = parse_suite(url, soup)
+            if record is None:
+                parse_error = "套件页缺少 .suite-no 编号标记，无法解析"
+        elif kind == "item":
+            record = parse_item(url, soup)
+            if record is None:
+                parse_error = "器件页缺少 .acc-no 编号标记，无法解析"
+        return kind, record, next_links, detail_links, parse_error
+
+    @staticmethod
+    def _snapshot(kind, record, next_links, detail_links) -> tuple:
+        """把与核对相关的内容压成可比较的快照，用于复读对照。"""
+        if isinstance(record, SuiteRecord):
+            rec = (record.number, tuple((m.accession, m.link) for m in record.members))
+        elif isinstance(record, ItemRecord):
+            rec = (record.number, record.suite_no)
+        else:
+            rec = None
+        return (kind, rec, tuple(next_links), tuple(detail_links))
+
     def run(self) -> CrawlResult:
         t0 = time.monotonic()
         queue: deque[str] = deque([self.start_url])
@@ -169,6 +253,8 @@ class Crawler:
         items: list[ItemRecord] = []
         failures: list[FetchFailure] = []
         notes: list[str] = []
+        fetch_order: list[str] = []       # 本轮成功读取的页面（按抓取顺序）
+        snapshots: dict[str, tuple] = {}  # 首轮内容快照，供复读对照
 
         def enqueue(u: str, ref: str | None) -> None:
             if u in visited:
@@ -202,40 +288,21 @@ class Crawler:
                 failures.append(FetchFailure(url=url, referrer=first_ref(url), reason=str(e)))
                 continue
             visited.add(url)
-            soup = BeautifulSoup(html, "html.parser")
-            kind = page_kind(soup)
-            if kind == "suite":
-                rec = parse_suite(url, soup)
-                if rec is None:
-                    failures.append(
-                        FetchFailure(url, first_ref(url), "套件页缺少 .suite-no 编号标记，无法解析")
-                    )
-                else:
-                    suites.append(rec)
+            kind, record, next_links, detail_links, parse_error = self._parse_page(url, html)
+            fetch_order.append(url)
+            snapshots[url] = self._snapshot(kind, record, next_links, detail_links)
+            if parse_error is not None:
+                failures.append(FetchFailure(url, first_ref(url), parse_error))
+            elif kind == "suite":
+                suites.append(record)
             elif kind == "item":
-                rec = parse_item(url, soup)
-                if rec is None:
-                    failures.append(
-                        FetchFailure(url, first_ref(url), "器件页缺少 .acc-no 编号标记，无法解析")
-                    )
-                else:
-                    items.append(rec)
+                items.append(record)
             else:
-                # 列表页（或起始的未知页）：沿 rel=next 继续分页
                 list_pages.append(url)
-                for a in soup.select('a[rel="next"][href]'):
-                    u = normalize_url(urljoin(url, a["href"]))
-                    if same_site(self.start_url, u):
-                        enqueue(u, url)
-            # 任意页面都可能链接到套件 / 器件详情
-            for a in soup.find_all("a", href=True):
-                u = normalize_url(urljoin(url, a["href"]))
-                if (
-                    u.startswith(("http://", "https://"))
-                    and same_site(self.start_url, u)
-                    and looks_like_detail(u)
-                ):
-                    enqueue(u, url)
+            for u in next_links:
+                enqueue(u, url)
+            for u in detail_links:
+                enqueue(u, url)
 
         duplicates = [
             {"url": u, "referrers": [r for r in refs if r]}
@@ -243,6 +310,29 @@ class Crawler:
             if u in visited and len([r for r in refs if r]) > 1
         ]
         duplicates.sort(key=lambda d: d["url"])
+
+        # —— 采集后复读：重新读取本轮成功抓取的每一页，对照分页与详情链接、
+        #    馆藏编号和所属关系，发现变化或复读失败即记录问题地址 ——
+        recheck: list[RecheckIssue] = []
+        for url in fetch_order:
+            try:
+                html = self._fetch(url)
+            except FetchFailed as e:
+                recheck.append(
+                    RecheckIssue(url=url, referrer=first_ref(url), reason=f"复读抓取失败：{e}")
+                )
+                continue
+            kind, record, next_links, detail_links, _ = self._parse_page(url, html)
+            snap = self._snapshot(kind, record, next_links, detail_links)
+            if snap != snapshots[url]:
+                recheck.append(
+                    RecheckIssue(
+                        url=url,
+                        referrer=first_ref(url),
+                        reason=describe_change(snapshots[url], snap),
+                    )
+                )
+
         elapsed = time.monotonic() - t0
         return CrawlResult(
             start_url=self.start_url,
@@ -253,4 +343,6 @@ class Crawler:
             duplicates=duplicates,
             notes=notes,
             elapsed=elapsed,
+            recheck=recheck,
+            rechecked=len(fetch_order),
         )

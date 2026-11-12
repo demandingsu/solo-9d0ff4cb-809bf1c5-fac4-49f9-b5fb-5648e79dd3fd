@@ -31,6 +31,7 @@ def index(request: Request):
         context={
             "sample_entry": SAMPLE_ENTRY,
             "sample_broken": urljoin(SAMPLE_ENTRY, "broken-1.html"),
+            "sample_mutable": urljoin(SAMPLE_ENTRY, "mutable/"),
         },
     )
 
